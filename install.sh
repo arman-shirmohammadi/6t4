@@ -63,8 +63,8 @@ install_tunnel() {
     done
 
     if [[ -f "/etc/rc.local" ]]; then
-        read -p "File /etc/rc.local already exists. Do you want to overwrite it? (y/n): " overwrite
-        [[ "$overwrite" != "y" && "$overwrite" != "yes" ]] && echo "Stopped process." && sleep 5 && return
+        read -p "File /etc/rc.local already exists. Overwrite? (y/n): " overwrite
+        [[ "$overwrite" != "y" && "$overwrite" != "yes" ]] && echo "Stopped." && sleep 2 && return
     fi
 
     echo "#! /bin/bash" > /etc/rc.local
@@ -93,21 +93,56 @@ uninstall_tunnel() {
 
     [[ -f /etc/rc.local ]] && rm /etc/rc.local
 
-    echo -e "\033[92m✅ Uninstallation completed for $server_type tunnel.\033[0m"
+    echo -e "\033[92m✅ Tunnel for $server_type removed.\033[0m"
 }
 
 list_tunnels_menu() {
     clear
     echo -e "\033[94m📋 Existing Tunnels\033[0m"
-    ip tunnel show | awk '{print $1}' | nl
-    echo -e "\033[93mEnter tunnel name to delete (or leave empty to cancel):\033[0m"
-    read -r tunnel_name
-    if [[ -n "$tunnel_name" ]]; then
-        ip link delete "$tunnel_name" 2>/dev/null
-        echo -e "\033[92m✅ Tunnel '$tunnel_name' deleted.\033[0m"
-    else
-        echo -e "\033[93m⚠️ No tunnel deleted.\033[0m"
+
+    local tunnels=()
+    local count=1
+
+    while IFS= read -r line; do
+        name=$(echo "$line" | awk '{print $1}' | sed 's/://')
+        [[ "$name" == "sit0" || -z "$name" ]] && continue
+        ip_info=$(ip tunnel show "$name" | grep -oP "remote \K\S+")
+        label="$name"
+        [[ -n "$ip_info" ]] && label="$name ($ip_info)"
+        tunnels+=("$name")
+        echo -e "$count) $label"
+        ((count++))
+    done < <(ip tunnel show)
+
+    if [[ ${#tunnels[@]} -eq 0 ]]; then
+        echo -e "\033[93m⚠️ No active tunnels found.\033[0m"
+        sleep 2
+        main_menu
+        return
     fi
+
+    echo -e "\033[93mEnter number of tunnel to delete (or leave empty):\033[0m"
+    read -r delete_index
+
+    if [[ -z "$delete_index" ]]; then
+        echo -e "\033[93m⚠️ No tunnel deleted.\033[0m"
+        sleep 2
+        main_menu
+        return
+    fi
+
+    if ! [[ "$delete_index" =~ ^[0-9]+$ ]] || ((delete_index < 1 || delete_index > ${#tunnels[@]})); then
+        echo -e "\033[91m❌ Invalid selection.\033[0m"
+        sleep 2
+        main_menu
+        return
+    fi
+
+    selected_tunnel="${tunnels[$((delete_index-1))]}"
+    ip link delete "$selected_tunnel" 2>/dev/null && \
+    echo -e "\033[92m✅ '$selected_tunnel' deleted.\033[0m" || \
+    echo -e "\033[91m❌ Failed to delete '$selected_tunnel'.\033[0m"
+
     sleep 2
     main_menu
 }
@@ -138,28 +173,27 @@ install_ispblocker_script() {
 
 main_menu() {
     clear
-    echo -e "\033[94m🚀 Tunnel System Installer/Uninstaller\033[0m"
-    echo -e "\033[93m-----------------------------------------\033[0m"
+    echo -e "\033[94m🚀 Tunnel Manager\033[0m"
     echo -e "\033[92m1. Install\033[0m"
     echo -e "\033[91m2. Uninstall\033[0m"
     echo -e "\033[94m3. Scripts\033[0m"
     echo -e "\033[95m4. List/Delete Tunnels\033[0m"
-    read -p $'\033[93mEnter the number of your choice: \033[0m' choice
+    read -p $'\033[93mChoose: \033[0m' choice
 
     case $choice in
         1) install_menu ;;
         2) uninstall_menu ;;
         3) scripts_menu ;;
         4) list_tunnels_menu ;;
-        *) echo -e "\033[91mInvalid option.\033[0m"; sleep 2; main_menu ;;
+        *) echo -e "\033[91m❌ Invalid.\033[0m"; sleep 2; main_menu ;;
     esac
 }
 
 install_menu() {
     clear
     echo -e "\033[94m🛠️ Install Menu\033[0m"
-    echo -e "\033[92m1. 6to4\033[0m"
-    echo -e "\033[91m2. iptables\033[0m"
+    echo -e "\033[92m1. 6to4"
+    echo -e "\033[91m2. iptables"
     echo -e "\033[90m3. Back\033[0m"
     read -r tunnel_type
 
@@ -167,27 +201,27 @@ install_menu() {
         1) tunnel_type="6to4" ;;
         2) tunnel_type="iptables" ;;
         3) main_menu; return ;;
-        *) echo -e "\033[91mInvalid tunnel type.\033[0m"; return ;;
+        *) echo -e "\033[91mInvalid.\033[0m"; return ;;
     esac
 
-    echo -e "\033[93mSelect server type:\n\033[92m1. Iran\n\033[91m2. Foreign\n\033[90m3. Back\033[0m"
+    echo -e "\033[93mSelect server:\n\033[92m1. Iran\n\033[91m2. Foreign\n\033[90m3. Back\033[0m"
     read -r server_type
 
     case $server_type in
         1)
             server_type="iran"
             iran_ip=$(get_current_ip)
-            echo -e "\033[93mDetected Iran IP: $iran_ip\033[0m"
-            read -p $'\033[93mEnter Foreign server IP: \033[0m' foreign_ip
+            echo -e "\033[93mIran IP: $iran_ip\033[0m"
+            read -p $'\033[93mEnter Foreign IP: \033[0m' foreign_ip
             ;;
         2)
             server_type="foreign"
             foreign_ip=$(get_current_ip)
-            echo -e "\033[93mDetected Foreign IP: $foreign_ip\033[0m"
-            read -p $'\033[93mEnter Iran server IP: \033[0m' iran_ip
+            echo -e "\033[93mForeign IP: $foreign_ip\033[0m"
+            read -p $'\033[93mEnter Iran IP: \033[0m' iran_ip
             ;;
         3) install_menu; return ;;
-        *) echo -e "\033[91mInvalid server type.\033[0m"; return ;;
+        *) echo -e "\033[91mInvalid.\033[0m"; return ;;
     esac
 
     install_tunnel "$iran_ip" "$foreign_ip" "$server_type" "$tunnel_type"
@@ -197,33 +231,31 @@ install_menu() {
 uninstall_menu() {
     clear
     echo -e "\033[94m🗑️ Uninstall Menu\033[0m"
-    echo -e "\033[92m1. Iran\033[0m"
-    echo -e "\033[91m2. Foreign\033[0m"
+    echo -e "\033[92m1. Iran"
+    echo -e "\033[91m2. Foreign"
     echo -e "\033[90m3. Back\033[0m"
     read -r server_type
 
     case $server_type in
-        1) server_type="iran" ;;
-        2) server_type="foreign" ;;
+        1) uninstall_tunnel "iran" ;;
+        2) uninstall_tunnel "foreign" ;;
         3) main_menu; return ;;
-        *) echo -e "\033[91mInvalid server type.\033[0m"; return ;;
+        *) echo -e "\033[91mInvalid.\033[0m"; return ;;
     esac
-
-    uninstall_tunnel "$server_type"
     main_menu
 }
 
 scripts_menu() {
     clear
     echo -e "\033[94m🧩 Scripts Menu\033[0m"
-    echo -e "\033[92m1. Install Sanaie Script"
-    echo -e "\033[34m2. Install Alireza Script"
-    echo -e "\033[36m3. Install Ghost Script"
-    echo -e "\033[33m4. Install PFTUN Script"
-    echo -e "\033[35m5. Install Reverse Script"
-    echo -e "\033[34m6. Install IR-ISPBLOCKER Script"
+    echo -e "\033[92m1. Sanaie"
+    echo -e "\033[34m2. Alireza"
+    echo -e "\033[36m3. Ghost"
+    echo -e "\033[33m4. PFTUN"
+    echo -e "\033[35m5. Reverse"
+    echo -e "\033[34m6. ISP Blocker"
     echo -e "\033[90m7. Back\033[0m"
-    read -p $'\033[93mEnter your choice: \033[0m' script_choice
+    read -p $'\033[93mChoose: \033[0m' script_choice
 
     case $script_choice in
         1) install_sanaie_script ;;
@@ -233,7 +265,7 @@ scripts_menu() {
         5) install_reverse_script ;;
         6) install_ispblocker_script ;;
         7) main_menu; return ;;
-        *) echo -e "\033[91mInvalid choice.\033[0m" ;;
+        *) echo -e "\033[91mInvalid.\033[0m" ;;
     esac
     main_menu
 }
