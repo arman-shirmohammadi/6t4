@@ -15,7 +15,6 @@ install_tunnel() {
 
     if [[ $tunnel_type == "6to4" ]]; then
         if [[ $server_type == "iran" ]]; then
-            # دستورها برای ایران
             commands=(
                 "ip tunnel add 6to4_iran mode sit remote $foreign_ip local $iran_ip"
                 "ip -6 addr add 2002:a00:100::1/64 dev 6to4_iran"
@@ -27,7 +26,6 @@ install_tunnel() {
                 "ip link set GRE6Tun_iran up"
                 "sysctl net.ipv4.ip_forward=1"
             )
-            # قوانین iptables با پورت‌های ورودی
             for port in "${ports[@]}"; do
                 commands+=("iptables -t nat -A PREROUTING -p tcp --dport $port -j DNAT --to-destination 192.168.168.1")
             done
@@ -36,7 +34,6 @@ install_tunnel() {
                 "iptables -t nat -A POSTROUTING -j MASQUERADE"
             )
         elif [[ $server_type == "foreign" ]]; then
-            # دستورها برای خارج
             commands=(
                 "ip tunnel add 6to4_Forign mode sit remote $iran_ip local $foreign_ip"
                 "ip -6 addr add 2002:a00:100::2/64 dev 6to4_Forign"
@@ -91,7 +88,6 @@ install_tunnel() {
 uninstall_tunnel() {
     local server_type=$1
 
-    # حذف تونل‌های 6to4 و GRE مرتبط
     if [[ $server_type == "iran" ]]; then
         ip tunnel del 6to4_iran 2>/dev/null
         ip -6 tunnel del GRE6Tun_iran 2>/dev/null
@@ -100,13 +96,11 @@ uninstall_tunnel() {
         ip -6 tunnel del GRE6Tun_Forign 2>/dev/null
     fi
 
-    # حذف قوانین iptables مربوط به تونل
     iptables -t nat -D PREROUTING -p tcp --dport 22 -j DNAT --to-destination 192.168.168.1 2>/dev/null
     iptables -t nat -D PREROUTING -j DNAT --to-destination 192.168.168.2 2>/dev/null
     iptables -t nat -D POSTROUTING -j MASQUERADE 2>/dev/null
     iptables -D INPUT --proto icmp -j DROP 2>/dev/null
 
-    # حذف فایل rc.local اگر موجود است
     if [[ -f "/etc/rc.local" ]]; then
         rm -f /etc/rc.local
         echo -e "\033[92mRemoved /etc/rc.local file.\033[0m"
@@ -115,7 +109,6 @@ uninstall_tunnel() {
     echo -e "\033[92mTunnel and related settings uninstalled successfully for server type: $server_type.\033[0m"
 }
 
-# حذف تونل خاص با نام دلخواه از لیست تونل‌ها
 uninstall_specific_tunnel() {
     echo -e "\033[94mList of existing tunnels:\033[0m"
     ip tunnel show
@@ -124,7 +117,6 @@ uninstall_specific_tunnel() {
         return
     fi
 
-    # حذف تونل انتخابی
     ip tunnel del "$tun_name" 2>/dev/null
     if [[ $? -eq 0 ]]; then
         echo -e "\033[92mTunnel '$tun_name' removed successfully.\033[0m"
@@ -189,31 +181,45 @@ install_menu() {
     read -r tunnel_type
 
     if [[ $tunnel_type != "1" && $tunnel_type != "2" && $tunnel_type != "3" ]]; then
-        echo -e "\033[91mInvalid tunnel type. Please enter '1', '2', or '3'.\033[0m"
+        echo -e "\033[91mInvalid choice. Please enter '1', '2', or '3'.\033[0m"
         sleep 2
         install_menu
         return
     fi
 
-    if [[ $tunnel_type == "1" ]]; then
-        tunnel_type="6to4"
-    elif [[ $tunnel_type == "2" ]]; then
-        tunnel_type="iptables"
-    elif [[ $tunnel_type == "3" ]]; then
+    if [[ $tunnel_type == "3" ]]; then
         main_menu
         return
     fi
 
-    read -p "Enter server type (iran/foreign): " server_type
-    if [[ $server_type != "iran" && $server_type != "foreign" ]]; then
-        echo -e "\033[91mInvalid server type. Please enter 'iran' or 'foreign'.\033[0m"
+    # لیست تونل های موجود با اسم و IP تونل شده نمایش داده میشه
+    echo -e "\033[94mAvailable tunnels:\033[0m"
+    # مثال ساخت آرایه تونل‌ها (در عمل از جایی بخوانید)
+    # format: "name|ip|type"
+    tunnels=(
+        "iran_tunnel|192.168.168.1|iran"
+        "foreign_tunnel|192.168.168.2|foreign"
+    )
+
+    echo "Choose server type:"
+    for i in "${!tunnels[@]}"; do
+        IFS='|' read -r name ip type <<< "${tunnels[$i]}"
+        echo "$((i+1)). $name - IP: $ip"
+    done
+    read -p "Enter the number of your server: " server_choice
+
+    if ! [[ "$server_choice" =~ ^[1-9][0-9]*$ ]] || ((server_choice < 1 || server_choice > ${#tunnels[@]})); then
+        echo -e "\033[91mInvalid choice. Please enter a valid number.\033[0m"
         sleep 2
         install_menu
         return
     fi
 
-    read -p "Enter Iranian IP: " iran_ip
-    read -p "Enter Foreign IP: " foreign_ip
+    IFS='|' read -r name iran_ip foreign_ip <<< "${tunnels[$((server_choice-1))]}"
+
+    # چون نوع سرور تو آرایه داریم، مستقیم مقدار می‌گیریم
+    server_type="${tunnels[$((server_choice-1))]}"
+    IFS='|' read -r _ _ server_type <<< "${tunnels[$((server_choice-1))]}"
 
     echo -e "Enter ports separated by space (e.g. 80 443 22):"
     read -a ports
@@ -241,13 +247,25 @@ uninstall_menu() {
     fi
 
     if [[ $uninstall_choice == "1" ]]; then
-        read -p "Enter server type (iran/foreign): " server_type
-        if [[ $server_type != "iran" && $server_type != "foreign" ]]; then
-            echo -e "\033[91mInvalid server type. Please enter 'iran' or 'foreign'.\033[0m"
+        echo -e "\033[94mAvailable tunnels:\033[0m"
+        tunnels=(
+            "iran_tunnel|192.168.168.1|iran"
+            "foreign_tunnel|192.168.168.2|foreign"
+        )
+        for i in "${!tunnels[@]}"; do
+            IFS='|' read -r name ip type <<< "${tunnels[$i]}"
+            echo "$((i+1)). $name - IP: $ip"
+        done
+        read -p "Enter the number of your server: " server_choice
+
+        if ! [[ "$server_choice" =~ ^[1-9][0-9]*$ ]] || ((server_choice < 1 || server_choice > ${#tunnels[@]})); then
+            echo -e "\033[91mInvalid choice. Please enter a valid number.\033[0m"
             sleep 2
             uninstall_menu
             return
         fi
+
+        IFS='|' read -r _ _ server_type <<< "${tunnels[$((server_choice-1))]}"
         uninstall_tunnel "$server_type"
         sleep 3
         main_menu
