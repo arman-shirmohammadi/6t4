@@ -6,6 +6,37 @@ function get_current_ip() {
     echo "$current_ip"
 }
 
+function list_tunnels() {
+    echo -e "\033[94mAvailable tunnels:\033[0m"
+    ip tunnel show | awk '{print $1}'
+}
+
+function uninstall_specific_tunnel() {
+    echo -e "\033[93mFetching current tunnels...\033[0m"
+    tunnels=( $(ip tunnel show | awk '{print $1}') )
+
+    if [[ ${#tunnels[@]} -eq 0 ]]; then
+        echo -e "\033[91mNo tunnels found to delete.\033[0m"
+        sleep 2
+        return
+    fi
+
+    echo -e "\033[92mSelect a tunnel to delete:\033[0m"
+    select tunnel in "${tunnels[@]}" "Cancel"; do
+        if [[ $REPLY -ge 1 && $REPLY -le ${#tunnels[@]} ]]; then
+            ip tunnel del "$tunnel" 2>/dev/null
+            echo -e "\033[91mTunnel '$tunnel' deleted.\033[0m"
+            break
+        elif [[ $REPLY -eq $(( ${#tunnels[@]} + 1 )) ]]; then
+            echo "Cancelled."
+            break
+        else
+            echo -e "\033[91mInvalid selection.\033[0m"
+        fi
+    done
+    sleep 2
+}
+
 install_tunnel() {
     local iran_ip=$1
     local foreign_ip=$2
@@ -144,14 +175,18 @@ main_menu() {
     echo -e "\033[94mTunnel System Menu\033[0m"
     echo -e "\033[93m-----------------------------------------\033[0m"
     echo -e "\033[92m1. Install Tunnel\033[0m"
-    echo -e "\033[91m2. Uninstall Tunnel\033[0m"
-    echo -e "\033[90m3. Exit\033[0m"
+    echo -e "\033[91m2. Uninstall All Tunnels\033[0m"
+    echo -e "\033[96m3. Uninstall Specific Tunnel\033[0m"
+    echo -e "\033[95m4. List Tunnels\033[0m"
+    echo -e "\033[90m5. Exit\033[0m"
     read -p "Enter your choice: " choice
 
     case $choice in
         1) install_menu ;;
         2) uninstall_tunnel ; main_menu ;;
-        3) exit ;;
+        3) uninstall_specific_tunnel ; main_menu ;;
+        4) list_tunnels ; read -p "Press Enter to return..." ; main_menu ;;
+        5) exit ;;
         *) echo -e "\033[91mInvalid choice.\033[0m" ; sleep 1 ; main_menu ;;
     esac
 }
