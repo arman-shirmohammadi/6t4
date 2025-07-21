@@ -1,144 +1,141 @@
 #!/bin/bash
 
-function get_current_ip() {
-    local current_ip
-    current_ip=$(curl -s https://api.ipify.org)
-    echo "$current_ip"
+# مسیر فایل کانفیگ 6to4 و تونل‌ها
+CONFIG_FILE="/etc/ip6tables/6to4.conf"
+
+# تابع نمایش منو
+show_menu() {
+    clear
+    echo "==== 6to4 Tunnel Manager ===="
+    echo "1) Install 6to4 tunnels"
+    echo "2) Show existing tunnels"
+    echo "3) Delete a tunnel"
+    echo "4) Uninstall 6to4"
+    echo "5) Exit"
+    echo "============================="
+    echo -n "Enter your choice: "
 }
 
-install_tunnel() {
-    local iran_ip=$1
-    local foreign_ips=("${!2}") # دریافت آرایه IPهای سرورهای خارجی
-    local server_type=$3
-    local tunnel_type=$4
-    local ports=("${!5}") # دریافت آرایه پورت‌ها
+# تابع نصب تونل‌ها با دریافت لیست IP سرورها و پورت‌ها
+install_tunnels() {
+    echo "Enter IPv4 addresses for your remote servers separated by space:"
+    read -r -a servers
 
-    if [[ $tunnel_type == "6to4" ]]; then
-        if [[ $server_type == "iran" ]]; then
-            for idx in "${!foreign_ips[@]}"; do
-                local foreign_ip=${foreign_ips[$idx]}
-                local port=${ports[$idx]}
-                echo "Setting up 6to4 tunnel to Foreign IP $foreign_ip on port $port..."
+    echo "Enter ports for each server separated by space (order matters):"
+    read -r -a ports
 
-                commands=(
-                    "ip tunnel add 6to4_iran_$idx mode sit remote $foreign_ip local $iran_ip"
-                    "ip -6 addr add 2002:a00:100::1/64 dev 6to4_iran_$idx"
-                    "ip link set 6to4_iran_$idx mtu 1480"
-                    "ip link set 6to4_iran_$idx up"
-                    "ip -6 tunnel add GRE6Tun_iran_$idx mode ip6gre remote 2002:a00:100::2 local 2002:a00:100::1"
-                    "ip addr add 192.168.168.$((2*idx+1))/30 dev GRE6Tun_iran_$idx"
-                    "ip link set GRE6Tun_iran_$idx mtu 1436"
-                    "ip link set GRE6Tun_iran_$idx up"
-                    "sysctl -w net.ipv4.ip_forward=1"
-                    "iptables -t nat -A PREROUTING -p tcp --dport $port -j DNAT --to-destination 192.168.168.$((2*idx+1))"
-                    "iptables -t nat -A PREROUTING -j DNAT --to-destination 192.168.168.$((2*idx+2))"
-                    "iptables -t nat -A POSTROUTING -j MASQUERADE"
-                )
-
-                for command in "${commands[@]}"; do
-                    echo "Executing: $command"
-                    eval "$command"
-                    if [[ $? -ne 0 ]]; then
-                        echo -e "\033[91mError executing: $command\033[0m"
-                        return 1
-                    fi
-                done
-            done
-
-        elif [[ $server_type == "foreign" ]]; then
-            # برای حالت foreign فرض کردیم فقط یک foreign_ip داریم ولی میشه مشابه ایران هم توسعه داد
-            commands=(
-                "ip tunnel add 6to4_Foreign mode sit remote $iran_ip local ${foreign_ips[0]}"
-                "ip -6 addr add 2002:a00:100::2/64 dev 6to4_Foreign"
-                "ip link set 6to4_Foreign mtu 1480"
-                "ip link set 6to4_Foreign up"
-                "ip -6 tunnel add GRE6Tun_Foreign mode ip6gre remote 2002:a00:100::1 local 2002:a00:100::2"
-                "ip addr add 192.168.168.2/30 dev GRE6Tun_Foreign"
-                "ip link set GRE6Tun_Foreign mtu 1436"
-                "ip link set GRE6Tun_Foreign up"
-                "iptables -A INPUT --proto icmp -j DROP"
-            )
-
-            for command in "${commands[@]}"; do
-                echo "Executing: $command"
-                eval "$command"
-                if [[ $? -ne 0 ]]; then
-                    echo -e "\033[91mError executing: $command\033[0m"
-                    return 1
-                fi
-            done
-        fi
-    elif [[ $tunnel_type == "iptables" ]]; then
-        commands=(
-            "sysctl -w net.ipv4.ip_forward=1"
-            "iptables -t nat -A PREROUTING -p tcp --dport 22 -j DNAT --to-destination $iran_ip"
-            "iptables -t nat -A PREROUTING -j DNAT --to-destination ${foreign_ips[0]}"
-            "iptables -t nat -A POSTROUTING -j MASQUERADE"
-        )
-        for command in "${commands[@]}"; do
-            echo "Executing: $command"
-            eval "$command"
-            if [[ $? -ne 0 ]]; then
-                echo -e "\033[91mError executing: $command\033[0m"
-                return 1
-            fi
-        done
+    if [ ${#servers[@]} -ne ${#ports[@]} ]; then
+        echo "Error: Number of servers and ports must be the same."
+        return
     fi
 
-    # ذخیره دستورات در rc.local برای بوت شدن
-    if [[ -f "/etc/rc.local" ]]; then
-        read -p "File /etc/rc.local already exists. Do you want to overwrite it? (y/n): " overwrite
-        if [[ $overwrite != "y" && $overwrite != "yes" ]]; then
-            echo "Stopped process."
-            sleep 5
-            return
-        fi
-    fi
+    echo "Installing tunnels..."
+    echo "" > "$CONFIG_FILE"  # خالی کردن فایل کانفیگ
 
-    echo "#!/bin/bash" > /etc/rc.local
-    for idx in "${!foreign_ips[@]}"; do
-        if [[ $server_type == "iran" && $tunnel_type == "6to4" ]]; then
-            echo "ip tunnel add 6to4_iran_$idx mode sit remote ${foreign_ips[$idx]} local $iran_ip" >> /etc/rc.local
-            echo "ip -6 addr add 2002:a00:100::1/64 dev 6to4_iran_$idx" >> /etc/rc.local
-            echo "ip link set 6to4_iran_$idx mtu 1480" >> /etc/rc.local
-            echo "ip link set 6to4_iran_$idx up" >> /etc/rc.local
-            echo "ip -6 tunnel add GRE6Tun_iran_$idx mode ip6gre remote 2002:a00:100::2 local 2002:a00:100::1" >> /etc/rc.local
-            echo "ip addr add 192.168.168.$((2*idx+1))/30 dev GRE6Tun_iran_$idx" >> /etc/rc.local
-            echo "ip link set GRE6Tun_iran_$idx mtu 1436" >> /etc/rc.local
-            echo "ip link set GRE6Tun_iran_$idx up" >> /etc/rc.local
-            echo "sysctl -w net.ipv4.ip_forward=1" >> /etc/rc.local
-            echo "iptables -t nat -A PREROUTING -p tcp --dport ${ports[$idx]} -j DNAT --to-destination 192.168.168.$((2*idx+1))" >> /etc/rc.local
-            echo "iptables -t nat -A PREROUTING -j DNAT --to-destination 192.168.168.$((2*idx+2))" >> /etc/rc.local
-            echo "iptables -t nat -A POSTROUTING -j MASQUERADE" >> /etc/rc.local
-        fi
+    for i in "${!servers[@]}"; do
+        server_ip=${servers[$i]}
+        port=${ports[$i]}
+        tunnel_name="sit$i"
+
+        # حذف تونل اگر وجود داشته باشد
+        ip tunnel del "$tunnel_name" 2>/dev/null
+
+        # ایجاد تونل
+        ip tunnel add "$tunnel_name" mode sit remote "$server_ip" local $(hostname -I | awk '{print $1}') ttl 255
+        ip link set "$tunnel_name" up
+
+        # تنظیم آدرس‌ها (مثال زیر فقط نمونه است، بر اساس نیاز خود تغییر بده)
+        ip addr add 192.88.99.$((i+1))/30 dev "$tunnel_name"
+
+        # اگر می‌خواهید روت‌های IPv6 را اضافه کنید اینجا اضافه کنید
+        # مثال: ip -6 route add ::/0 dev "$tunnel_name"
+
+        # اضافه کردن به فایل کانفیگ
+        echo "$tunnel_name $server_ip $port" >> "$CONFIG_FILE"
+
+        echo "Tunnel $tunnel_name created for server $server_ip on port $port"
     done
-    echo "exit 0" >> /etc/rc.local
-    chmod +x /etc/rc.local
 
-    echo -e "\033[92mTunnel installation successful.\033[0m"
+    echo "All tunnels installed and configured."
+    read -p "Press Enter to continue..."
 }
 
-uninstall_tunnel() {
-    local server_type=$1
+# نمایش تونل‌های موجود
+show_tunnels() {
+    clear
+    echo "Available tunnels:"
+    if [ ! -f "$CONFIG_FILE" ] || [ ! -s "$CONFIG_FILE" ]; then
+        echo "No tunnels configured."
+    else
+        nl -w3 -s". " "$CONFIG_FILE"
+    fi
+    echo "Press Enter to return..."
+    read -r
+}
 
-    # حذف تانل‌ها و قوانین مرتبط
-    if [[ $server_type == "iran" ]]; then
-        # حذف همه تونل‌های با اسم 6to4_iran_* و GRE6Tun_iran_*
-        ip tunnel show | grep 6to4_iran_ | awk '{print $1}' | while read -r tun; do
-            ip tunnel del "$tun"
-            echo "Deleted tunnel: $tun"
-        done
-        ip tunnel show | grep GRE6Tun_iran_ | awk '{print $1}' | while read -r tun; do
-            ip tunnel del "$tun"
-            echo "Deleted tunnel: $tun"
-        done
+# حذف تونل مشخص شده توسط کاربر
+delete_tunnel() {
+    if [ ! -f "$CONFIG_FILE" ] || [ ! -s "$CONFIG_FILE" ]; then
+        echo "No tunnels to delete."
+        read -p "Press Enter to continue..."
+        return
+    fi
 
-        # پاک کردن قوانین iptables مرتبط (در صورت وجود)
-        iptables -t nat -D PREROUTING -p tcp --dport 22 -j DNAT --to-destination 192.168.168.1 2>/dev/null
-        iptables -t nat -F POSTROUTING 2>/dev/null
-        iptables -t nat -F PREROUTING 2>/dev/null
+    echo "Select a tunnel to delete:"
+    nl -w3 -s". " "$CONFIG_FILE"
+    echo -n "Enter tunnel number: "
+    read -r num
 
-    elif [[ $server_type == "foreign" ]]; then
-        ip tunnel show | grep 6to4_Foreign | awk '{print $1}' | while read -r tun; do
-            ip tunnel del "$tun"
-            echo "Deleted tunnel: $tun"
+    total=$(wc -l < "$CONFIG_FILE")
+    if ! [[ "$num" =~ ^[0-9]+$ ]] || [ "$num" -lt 1 ] || [ "$num" -gt "$total" ]; then
+        echo "Invalid selection."
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    line=$(sed -n "${num}p" "$CONFIG_FILE")
+    tunnel_name=$(echo "$line" | awk '{print $1}')
+
+    # حذف تونل
+    ip tunnel del "$tunnel_name" 2>/dev/null
+
+    # حذف از فایل کانفیگ
+    sed -i "${num}d" "$CONFIG_FILE"
+
+    echo "Tunnel $tunnel_name deleted."
+    read -p "Press Enter to continue..."
+}
+
+# حذف کامل 6to4
+uninstall_6to4() {
+    echo "Deleting all tunnels..."
+
+    if [ -f "$CONFIG_FILE" ]; then
+        while IFS= read -r line; do
+            tunnel_name=$(echo "$line" | awk '{print $1}')
+            ip tunnel del "$tunnel_name" 2>/dev/null
+        done < "$CONFIG_FILE"
+
+        rm -f "$CONFIG_FILE"
+        echo "All tunnels deleted and config file removed."
+    else
+        echo "No config file found. Nothing to uninstall."
+    fi
+
+    echo "6to4 tunnels uninstalled."
+    read -p "Press Enter to continue..."
+}
+
+# اجرای منو و دریافت انتخاب کاربر
+while true; do
+    show_menu
+    read -r choice
+    case $choice in
+        1) install_tunnels ;;
+        2) show_tunnels ;;
+        3) delete_tunnel ;;
+        4) uninstall_6to4 ;;
+        5) echo "Exiting..."; exit 0 ;;
+        *) echo "Invalid choice, try again." ;;
+    esac
+done
