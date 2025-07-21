@@ -60,7 +60,7 @@ install_tunnel() {
         read -p "File /etc/rc.local already exists. Do you want to overwrite it? (y/n): " overwrite
         if [[ $overwrite != "y" && $overwrite != "yes" ]]; then
             echo "Stopped process."
-            sleep 5
+            sleep 2
             return
         fi
     fi
@@ -72,7 +72,26 @@ install_tunnel() {
     echo "exit 0" >> /etc/rc.local
     chmod +x /etc/rc.local
 
-    echo -e "\033[92mSuccessful\033[0m"
+    echo -e "\033[92mInstallation completed successfully.\033[0m"
+}
+
+uninstall_tunnel() {
+    echo -e "\033[93mRemoving tunnels and clearing iptables...\033[0m"
+    ip tunnel del 6to4_iran 2>/dev/null
+    ip tunnel del GRE6Tun_iran 2>/dev/null
+    ip tunnel del 6to4_Forign 2>/dev/null
+    ip tunnel del GRE6Tun_Forign 2>/dev/null
+
+    ip link set GRE6Tun_iran down 2>/dev/null
+    ip link set GRE6Tun_Forign down 2>/dev/null
+
+    iptables -t nat -F
+    iptables -F
+
+    [[ -f /etc/rc.local ]] && rm -f /etc/rc.local
+
+    echo -e "\033[91mAll tunnels and iptables rules removed.\033[0m"
+    sleep 2
 }
 
 install_menu() {
@@ -122,16 +141,18 @@ install_menu() {
 
 main_menu() {
     clear
-    echo -e "\033[94mTunnel System Installer\033[0m"
+    echo -e "\033[94mTunnel System Menu\033[0m"
     echo -e "\033[93m-----------------------------------------\033[0m"
-    echo -e "\033[92m1. Install\033[0m"
-    echo -e "\033[91m2. Exit\033[0m"
+    echo -e "\033[92m1. Install Tunnel\033[0m"
+    echo -e "\033[91m2. Uninstall Tunnel\033[0m"
+    echo -e "\033[90m3. Exit\033[0m"
     read -p "Enter your choice: " choice
 
     case $choice in
         1) install_menu ;;
-        2) exit ;;
-        *) echo -e "\033[91mInvalid choice.\033[0m" ;;
+        2) uninstall_tunnel ; main_menu ;;
+        3) exit ;;
+        *) echo -e "\033[91mInvalid choice.\033[0m" ; sleep 1 ; main_menu ;;
     esac
 }
 
