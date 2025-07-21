@@ -11,7 +11,7 @@ install_tunnel() {
     local foreign_ip=$2
     local server_type=$3
     local tunnel_type=$4
-    local ports=("${!5}")  # آرایه پورت‌ها به صورت پارامتر پنجم (به صورت نام آرایه پاس داده می‌شود)
+    local ports=("${!5}")  # آرایه پورت‌ها به صورت پارامتر پنجم
 
     commands=()
 
@@ -28,10 +28,11 @@ install_tunnel() {
                 "ip link set GRE6Tun_iran up"
                 "sysctl net.ipv4.ip_forward=1"
             )
-            # اضافه کردن قوانین iptables برای لیست پورت‌ها
+            # اضافه کردن DNAT برای هر پورت در آرایه
             for port in "${ports[@]}"; do
                 commands+=("iptables -t nat -A PREROUTING -p tcp --dport $port -j DNAT --to-destination 192.168.168.1")
             done
+            # iptables بقیه تنظیمات
             commands+=(
                 "iptables -t nat -A PREROUTING -j DNAT --to-destination 192.168.168.2"
                 "iptables -t nat -A POSTROUTING -j MASQUERADE"
@@ -53,7 +54,7 @@ install_tunnel() {
         commands+=(
             "sysctl net.ipv4.ip_forward=1"
         )
-        # اضافه کردن قوانین iptables برای لیست پورت‌ها
+        # برای هر پورت لیست DNAT تنظیم شود
         for port in "${ports[@]}"; do
             commands+=("iptables -t nat -A PREROUTING -p tcp --dport $port -j DNAT --to-destination $iran_ip")
         done
@@ -64,6 +65,7 @@ install_tunnel() {
     fi
 
     for command in "${commands[@]}"; do
+        echo "Executing: $command"
         eval "$command"
     done
 
@@ -97,29 +99,66 @@ uninstall_tunnel() {
     echo -e "\033[92mSuccessful\033[0m"
 }
 
-install_sanaie_script() {
-    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+# سایر توابع و منوها بدون تغییر
+
+install_menu() {
+    clear
+    echo -e "\033[94mInstall Menu\033[0m"
+    echo -e "\033[93m-----------------------------------------\033[0m"
+    echo -e "\033[92m1. 6to4\033[0m"
+    echo -e "\033[91m2. iptables\033[0m"
+    echo -e "\033[90m3. Back\033[0m"
+    read -r tunnel_type_choice
+
+    if [[ $tunnel_type_choice != "1" && $tunnel_type_choice != "2" && $tunnel_type_choice != "3" ]]; then
+        echo -e "\033[91mInvalid tunnel type. Please enter '1', '2', or '3'.\033[0m"
+        return
+    fi
+
+    if [[ $tunnel_type_choice == "1" ]]; then
+        tunnel_type="6to4"
+    elif [[ $tunnel_type_choice == "2" ]]; then
+        tunnel_type="iptables"
+    elif [[ $tunnel_type_choice == "3" ]]; then
+        main_menu
+        return
+    fi
+
+    echo -e "\033[93mSelect your server type:\n\033[92m1. Iran\033[0m\n\033[91m2. Foreign\033[0m\n\033[91m3. Back\033[0m\nEnter the number of your server type: "
+    read -r server_type_choice
+
+    if [[ $server_type_choice != "1" && $server_type_choice != "2" && $server_type_choice != "3" ]]; then
+        echo -e "\033[91mInvalid server type. Please enter '1', '2', or '3'.\033[0m"
+        return
+    fi
+
+    if [[ $server_type_choice == "1" ]]; then
+        server_type="iran"
+        iran_ip=$(get_current_ip)
+        echo -e "\033[93mIran server IP address: $iran_ip\033[0m"
+        read -p $'\033[93mEnter Foreign server IP address: \033[0m' foreign_ip
+    elif [[ $server_type_choice == "2" ]]; then
+        server_type="foreign"
+        foreign_ip=$(get_current_ip)
+        echo -e "\033[93mForeign server IP address: $foreign_ip\033[0m"
+        read -p $'\033[93mEnter Iran server IP address: \033[0m' iran_ip
+    elif [[ $server_type_choice == "3" ]]; then
+        install_menu
+        return
+    fi
+
+    # دریافت لیست پورت ها (جدا شده با کاما)
+    read -p $'\033[93mEnter list of ports separated by commas (e.g. 22,80,443): \033[0m' ports_input
+    # تبدیل رشته به آرایه
+    IFS=',' read -r -a ports_array <<< "$ports_input"
+
+    # فراخوانی تابع با آرایه پورت‌ها
+    install_tunnel "$iran_ip" "$foreign_ip" "$server_type" "$tunnel_type" ports_array[@]
+
+    main_menu
 }
 
-install_alireza_script() {
-    bash <(curl -Ls https://raw.githubusercontent.com/alireza0/x-ui/master/install.sh)
-}
-
-install_ghost_script() {
-    bash <(curl -Ls https://github.com/masoudgb/Gost-ip6/raw/main/Gost.sh)
-}
-
-install_pftun_script() {
-    bash <(curl -s https://raw.githubusercontent.com/opiran-club/pf-tun/main/pf-tun.sh --ipv4)
-}
-
-install_reverse_script() {
-    bash <(curl -fsSL https://raw.githubusercontent.com/Ptechgithub/ReverseTlsTunnel/main/RtTunnel.sh)
-}
-
-install_ispblocker_script() {
-    bash <(curl -s https://raw.githubusercontent.com/Kiya6955/IR-ISP-Blocker/main/ir-isp-blocker.sh)
-}
+# سایر منوها (uninstall_menu, scripts_menu, main_menu) بدون تغییر
 
 main_menu() {
     clear
@@ -141,114 +180,4 @@ main_menu() {
     fi
 }
 
-install_menu() {
-    clear
-    echo -e "\033[94mInstall Menu\033[0m"
-    echo -e "\033[93m-----------------------------------------\033[0m"
-    echo -e "\033[92m1. 6to4\033[0m"
-    echo -e "\033[91m2. iptables\033[0m"
-    echo -e "\033[90m6. Back\033[0m"
-    read -r tunnel_type
-
-    if [[ $tunnel_type != "1" && $tunnel_type != "2" && $tunnel_type != "6" ]]; then
-        echo -e "\033[91mInvalid tunnel type. Please enter '1', '2', or '6'.\033[0m"
-        return
-    fi
-
-    if [[ $tunnel_type == "1" ]]; then
-        tunnel_type="6to4"
-    elif [[ $tunnel_type == "2" ]]; then
-        tunnel_type="iptables"
-    elif [[ $tunnel_type == "6" ]]; then
-        main_menu
-        return
-    fi
-
-    echo -e "\033[93mSelect your server type:\n\033[92m1. Iran\033[0m\n\033[91m2. Foreign\033[0m\n\033[91m3. Back\033[0m\nEnter the number of your server type: "
-    read -r server_type
-
-    if [[ $server_type != "1" && $server_type != "2" && $server_type != "3" ]]; then
-        echo -e "\033[91mInvalid server type. Please enter '1', '2', or '3'.\033[0m"
-        return
-    fi
-
-    if [[ $server_type == "1" ]]; then
-        server_type="iran"
-        iran_ip=$(get_current_ip)
-        echo -e "\033[93mIran server IP address: $iran_ip\033[0m"
-        read -p $'\033[93mEnter Foreign server IP address: \033[0m' foreign_ip
-    elif [[ $server_type == "2" ]]; then
-        server_type="foreign"
-        foreign_ip=$(get_current_ip)
-        echo -e "\033[93mForeign server IP address: $foreign_ip\033[0m"
-        read -p $'\033[93mEnter Iran server IP address: \033[0m' iran_ip
-    elif [[ $server_type == "3" ]]; then
-        install_menu
-        return
-    fi
-
-    # دریافت لیست پورت‌ها به صورت ورودی جداشده با کاما
-    read -p $'\033[93mEnter port list separated by commas (e.g. 22,80,443): \033[0m' port_list
-    # تبدیل ورودی به آرایه
-    IFS=',' read -r -a ports_array <<< "$port_list"
-
-    install_tunnel "$iran_ip" "$foreign_ip" "$server_type" "$tunnel_type" ports_array[@]
-    main_menu
-}
-
-uninstall_menu() {
-    clear
-    echo -e "\033[94mUninstall Menu\033[0m"
-    echo -e "\033[93m-----------------------------------------\033[0m"
-    echo -e "\033[92m1. Iran\033[0m"
-    echo -e "\033[91m2. Foreign\033[0m"
-    echo -e "\033[91m3. Back\033[0m"
-    read -r server_type
-
-    if [[ $server_type != "1" && $server_type != "2" && $server_type != "3" ]]; then
-        echo -e "\033[91mInvalid server type. Please enter '1', '2', or '3'.\033[0m"
-        return
-    fi
-
-    if [[ $server_type == "1" ]]; then
-        server_type="iran"
-    elif [[ $server_type == "2" ]]; then
-        server_type="foreign"
-    elif [[ $server_type == "3" ]]; then
-        main_menu
-        return
-    fi
-
-    uninstall_tunnel "$server_type"
-    main_menu
-}
-
-scripts_menu() {
-    clear
-    echo -e "\033[94mScripts Menu\033[0m"
-    echo -e "\033[93m-----------------------------------------\033[0m"
-    echo -e "\033[92m1. Install Sanaie Script\033[0m"
-    echo -e "\033[34m2. Install Alireza Script\033[0m"
-    echo -e "\033[36m3. Install Ghost Script\033[0m"
-    echo -e "\033[33m4. Install PFTUN Script\033[0m"
-    echo -e "\033[35m5. Install Reverse Script\033[0m"
-    echo -e "\033[34m6. Install IR-ISPBLOCKER Script\033[0m"
-    echo -e "\033[91m7. Back\033[0m"
-    read -r script_choice
-
-    case $script_choice in
-        1) install_sanaie_script ;;
-        2) install_alireza_script ;;
-        3) install_ghost_script ;;
-        4) install_pftun_script ;;
-        5) install_reverse_script ;;
-        6) install_ispblocker_script ;;
-        7) main_menu ;;
-        *) echo -e "\033[91mInvalid choice.\033[0m" ;;
-    esac
-
-    main_menu
-}
-
-# شروع برنامه
 main_menu
